@@ -1,0 +1,24 @@
+[project]
+name = "learn-machine-learning"
+version = "1.0.0"
+description = "Companion code for the Learn Machine Learning masterclass: scikit-learn pipelines, evaluation and tuning on built-in datasets"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "The Learning Hub" }]
+requires-python = ">=3.11"
+dependencies = [
+    "scikit-learn>=1.6",
+    "numpy>=2.0",
+    "pandas>=2.2",
+    "joblib>=1.4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+mlguide-train = "mlguide.train:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
