@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.11+-blue.svg?logo=python)](https://www.python.org/)
-[![scikit-learn](https://img.shields.io/badge/scikit--learn-1.6+-F7931E.svg?logo=scikitlearn)](https://scikit-learn.org/)
+[![scikit-learn](https://img.shields.io/badge/scikit--learn-1.8+-F7931E.svg?logo=scikitlearn)](https://scikit-learn.org/)
 [![pandas](https://img.shields.io/badge/pandas-2.2+-150458.svg?logo=pandas)](https://pandas.pydata.org/)
 [![NumPy](https://img.shields.io/badge/NumPy-2.0+-013243.svg?logo=numpy)](https://numpy.org/)
 [![Production Ready](https://img.shields.io/badge/Status-Enterprise%20Grade-brightgreen.svg)](https://github.com/TheLearningHubOrg/learn-machine-learning)
@@ -155,8 +155,8 @@ cd learn-machine-learning
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 
-# 2. Install pinned-floor dependencies
-pip install -r requirements.txt
+# 2. Install runtime dependencies plus pytest
+pip install -r requirements-dev.txt
 
 # 3. Run the test suite (14 behavioural checks)
 pytest -q
@@ -176,7 +176,8 @@ learn-machine-learning/
 ├── tests/test_models.py
 ├── Dockerfile
 ├── pyproject.toml
-└── requirements.txt
+├── requirements.txt       # runtime dependencies (scikit-learn 1.8+)
+└── requirements-dev.txt   # adds pytest
 ```
 
 ### 1.4 The scikit-learn Estimator API
@@ -313,7 +314,7 @@ Despite its name, logistic regression is a **classifier**. It computes a linear 
 
 $$\text{LogLoss} = -\frac{1}{n} \sum_{i=1}^{n} \big[ y_i \log p_i + (1 - y_i) \log(1 - p_i) \big]$$
 
-In scikit-learn, `C` is the **inverse** regularisation strength: smaller `C` means a stronger penalty. Since release 1.8 the `penalty` argument is deprecated; the penalty type is controlled by `l1_ratio` (0 for pure L2, 1 for pure L1) together with `C`.
+In scikit-learn, `C` is the **inverse** regularisation strength: smaller `C` means a stronger penalty. Since release 1.8 the `penalty` argument is deprecated; the penalty type is controlled by `l1_ratio` (0 for pure L2, 1 for pure L1) together with `C`. On releases before 1.8, `l1_ratio` is ignored unless `penalty="elasticnet"` is set, so the L1 example below would quietly fit an L2 model; that is why this repository requires scikit-learn 1.8 or newer.
 
 ```python
 from sklearn.datasets import load_breast_cancer
@@ -602,8 +603,10 @@ frame = pd.DataFrame(
     }
 )
 
-ratios = FunctionTransformer(add_ratios, feature_names_out="one-to-one")
-print(add_ratios(frame)[["charge_per_tenure", "tickets_per_year"]].round(2))
+# add_ratios returns more columns than it receives, so no feature_names_out here:
+# "one-to-one" would promise the input names and transform() would raise.
+ratios = FunctionTransformer(add_ratios)
+print(ratios.fit_transform(frame)[["charge_per_tenure", "tickets_per_year"]].round(2))
 
 features = ColumnTransformer(
     [
@@ -891,7 +894,7 @@ print(f"Brier raw={brier_score_loss(y_test, base.predict_proba(X_test)[:, 1]):.4
       f"calibrated={brier_score_loss(y_test, calibrated.predict_proba(X_test)[:, 1]):.4f}")
 ```
 
-To calibrate an already-fitted model on a separate holdout set, wrap it in `sklearn.frozen.FrozenEstimator`; the older `cv="prefit"` option is deprecated.
+To calibrate an already-fitted model on a separate holdout set, wrap it in `sklearn.frozen.FrozenEstimator`; the older `cv="prefit"` option was deprecated in 1.6 and current releases reject it.
 
 ---
 
@@ -1186,17 +1189,24 @@ class QuantileClipper(BaseEstimator, TransformerMixin):
         self.low_ = frame.quantile(self.lower).to_numpy()
         self.high_ = frame.quantile(self.upper).to_numpy()
         self.n_features_in_ = frame.shape[1]
-        self.feature_names_in_ = np.asarray(frame.columns, dtype=object)
+        if hasattr(X, "columns"):                 # only record names a DataFrame supplied
+            self.feature_names_in_ = np.asarray(X.columns, dtype=object)
         return self
 
     def transform(self, X):
         check_is_fitted(self, ["low_", "high_"])
-        clipped = np.clip(np.asarray(X, dtype=float), self.low_, self.high_)
-        return clipped
+        values = np.asarray(X, dtype=float)
+        if values.shape[1] != self.n_features_in_:
+            raise ValueError(f"expected {self.n_features_in_} columns, got {values.shape[1]}")
+        return np.clip(values, self.low_, self.high_)
 
     def get_feature_names_out(self, input_features=None):
-        check_is_fitted(self, "feature_names_in_")
-        return self.feature_names_in_ if input_features is None else np.asarray(input_features)
+        check_is_fitted(self, "n_features_in_")
+        if input_features is not None:
+            return np.asarray(input_features, dtype=object)
+        if hasattr(self, "feature_names_in_"):
+            return self.feature_names_in_
+        return np.asarray([f"x{i}" for i in range(self.n_features_in_)], dtype=object)
 
 
 train = pd.DataFrame({"latency_ms": [12, 15, 14, 13, 900], "payload_kb": [1, 2, 2, 3, 400]})
@@ -1387,7 +1397,7 @@ A sensible retraining policy combines a **schedule** (monthly retrains from a ro
 
 ### 6.7 Containerising the Trainer
 
-The repository's Dockerfile builds a slim, non-root image that runs the trainer and writes artifacts to a mounted volume.
+The repository's Dockerfile builds a slim, non-root image that runs the trainer and writes artifacts to a mounted volume. Only `requirements.txt` is installed, so pytest stays out of the runtime image.
 
 ```dockerfile
 # Production Dockerfile for the Machine Learning companion trainer
@@ -1406,7 +1416,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src
 
-RUN useradd --create-home --uid 10001 appuser
+RUN useradd --create-home --uid 10001 appuser     && mkdir -p /app/artifacts     && chown appuser:appuser /app/artifacts
 WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 COPY src ./src
@@ -1417,9 +1427,11 @@ CMD ["python", "-m", "mlguide.train", "--out", "/app/artifacts"]
 ```
 
 ```bash
-# Build the image and run a training job with artifacts on the host
+# Build the image and run a training job with artifacts on the host.
+# Create the host folder first and run as your own UID so the container can write to it.
 docker build -t learn-ml-trainer .
-docker run --rm -v "$(pwd)/artifacts:/app/artifacts" learn-ml-trainer
+mkdir -p artifacts
+docker run --rm --user "$(id -u):$(id -g)" -v "$(pwd)/artifacts:/app/artifacts" learn-ml-trainer
 
 # Inspect the evaluation report written by the job
 cat artifacts/report.json

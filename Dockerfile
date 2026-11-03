@@ -14,7 +14,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src
 
-RUN useradd --create-home --uid 10001 appuser
+RUN useradd --create-home --uid 10001 appuser     && mkdir -p /app/artifacts     && chown appuser:appuser /app/artifacts
 WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 COPY src ./src

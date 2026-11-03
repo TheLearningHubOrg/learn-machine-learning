@@ -7,7 +7,7 @@ license = "MIT"
 authors = [{ name = "The Learning Hub" }]
 requires-python = ">=3.11"
 dependencies = [
-    "scikit-learn>=1.6",
+    "scikit-learn>=1.8",
     "numpy>=2.0",
     "pandas>=2.2",
     "joblib>=1.4",
